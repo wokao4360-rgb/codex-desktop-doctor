@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Adds a concise English README at `README_EN.md`.
+
 ## v0.1.6 - 2026-05-03
 
 - Adds `RepairBrowserUsePlugin` for the "Browser plugin not found" / "未找到浏览器插件" failure.

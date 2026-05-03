@@ -1,5 +1,7 @@
 # codex-desktop-doctor
 
+[English README](README_EN.md)
+
 ## 先看这里 / Read this first
 
 **只下载一个文件：** [Latest Release](https://github.com/wokao4360-rgb/codex-desktop-doctor/releases/latest) 里的 `CodexDesktopDoctor.cmd`。
