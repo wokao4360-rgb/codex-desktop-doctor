@@ -30,6 +30,53 @@ function Invoke-Doctor([string[]]$DoctorArgs) {
   }
 }
 
+function Initialize-SessionStateFixture([string]$State) {
+  $schema = @'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("""
+create table threads (
+  id text primary key,
+  rollout_path text,
+  cwd text,
+  title text,
+  model_provider text,
+  updated_at integer,
+  updated_at_ms integer,
+  archived integer,
+  archived_at integer,
+  model text,
+  reasoning_effort text
+)
+""")
+con.commit()
+'@
+  $schema | python - $State
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to create sqlite fixture.' }
+}
+
+function Write-RolloutFixture {
+  param(
+    [string]$FixtureHome,
+    [string]$ThreadId,
+    [string]$Title = 'Smoke Test Thread',
+    [string]$Cwd = 'C:\tmp\fixture'
+  )
+
+  $dir = Join-Path $FixtureHome 'sessions\2026\05\03'
+  New-Item -ItemType Directory -Force -Path $dir | Out-Null
+  $rollout = Join-Path $dir "rollout-2026-05-03T05-00-00-$ThreadId.jsonl"
+  @(
+    @{ timestamp='2026-05-03T05:00:00Z'; type='session_meta'; payload=@{ cwd=$Cwd; cli_version='0.0.0-test' } },
+    @{ timestamp='2026-05-03T05:00:01Z'; type='turn_context'; payload=@{ cwd=$Cwd; model='gpt-5.5'; reasoning_effort='xhigh'; sandbox_policy=@{ type='danger-full-access' }; approval_policy='never' } },
+    @{ timestamp='2026-05-03T05:00:02Z'; type='event_msg'; payload=@{ type='user_message'; message="hello from $ThreadId" } },
+    @{ timestamp='2026-05-03T05:00:03Z'; type='event_msg'; payload=@{ type='thread_name_updated'; thread_name=$Title } }
+  ) | ForEach-Object { $_ | ConvertTo-Json -Compress -Depth 20 } |
+    Set-Content -LiteralPath $rollout -Encoding UTF8
+
+  return $rollout
+}
+
 Write-Test 'PowerShell parser'
 $parseErrors = $null
 [void][System.Management.Automation.PSParser]::Tokenize((Get-Content -LiteralPath $Doctor -Raw), [ref]$parseErrors)
@@ -194,6 +241,109 @@ con.commit()
   Assert ($rows -match $threadId) 'thread row was not inserted.'
   Assert ($rows -match 'Smoke Test Thread') 'thread title was not populated.'
   Assert ($rows -match 'codex_local_access') 'thread provider was not populated.'
+}
+finally {
+  Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Test 'RepairSessionVisibility Auto preserves existing extended paths'
+$fixtureHome = New-FixtureHome 'sessions-auto-path'
+try {
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value 'model_provider = "codex_local_access"'
+  $threadId = '22222222-3333-4444-5555-666666666666'
+  $rollout = Write-RolloutFixture -FixtureHome $fixtureHome -ThreadId $threadId -Title 'Extended Path Thread'
+  $state = Join-Path $fixtureHome 'state_5.sqlite'
+  Initialize-SessionStateFixture $state
+
+  $seed = @'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("insert into threads (id,rollout_path,cwd,title,model_provider) values (?,?,?,?,?)", (sys.argv[2], sys.argv[3], sys.argv[4], "Old Title", "old_provider"))
+con.commit()
+'@
+  $seed | python - $state $threadId ('\\?\' + $rollout) '\\?\C:\tmp\fixture'
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to seed sqlite fixture.' }
+
+  Invoke-Doctor @('-Action','RepairSessionVisibility','-CodexHome',$fixtureHome,'-ProviderName','codex_local_access')
+  $query = @'
+import json, sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.row_factory = sqlite3.Row
+row = con.execute("select rollout_path,cwd,title,model_provider from threads where id=?", (sys.argv[2],)).fetchone()
+print(json.dumps(dict(row)))
+'@
+  $row = $query | python - $state $threadId | ConvertFrom-Json
+  Assert ($row.rollout_path.StartsWith('\\?\')) 'Auto should preserve existing extended rollout_path style.'
+  Assert ($row.cwd.StartsWith('\\?\')) 'Auto should preserve existing extended cwd style.'
+  Assert ($row.title -eq 'Extended Path Thread') 'Auto path fixture should still update normal metadata.'
+  Assert ($row.model_provider -eq 'codex_local_access') 'Auto path fixture should still update provider metadata.'
+}
+finally {
+  Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Test 'RepairSessionVisibility can force extended paths'
+$fixtureHome = New-FixtureHome 'sessions-force-extended'
+try {
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value 'model_provider = "codex_local_access"'
+  $threadId = '33333333-4444-5555-6666-777777777777'
+  [void](Write-RolloutFixture -FixtureHome $fixtureHome -ThreadId $threadId -Title 'Forced Extended Path Thread')
+  $state = Join-Path $fixtureHome 'state_5.sqlite'
+  Initialize-SessionStateFixture $state
+
+  Invoke-Doctor @('-Action','RepairSessionVisibility','-CodexHome',$fixtureHome,'-ProviderName','codex_local_access','-ThreadPathStyle','Extended')
+  $query = @'
+import json, sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.row_factory = sqlite3.Row
+row = con.execute("select rollout_path,cwd from threads where id=?", (sys.argv[2],)).fetchone()
+print(json.dumps(dict(row)))
+'@
+  $row = $query | python - $state $threadId | ConvertFrom-Json
+  Assert ($row.rollout_path.StartsWith('\\?\')) 'ThreadPathStyle=Extended should write extended rollout_path.'
+  Assert ($row.cwd.StartsWith('\\?\')) 'ThreadPathStyle=Extended should write extended cwd.'
+}
+finally {
+  Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Test 'RepairSessionVisibility ThreadId only updates one thread'
+$fixtureHome = New-FixtureHome 'sessions-thread-filter'
+try {
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value 'model_provider = "codex_local_access"'
+  $threadOne = '44444444-5555-6666-7777-888888888888'
+  $threadTwo = '55555555-6666-7777-8888-999999999999'
+  [void](Write-RolloutFixture -FixtureHome $fixtureHome -ThreadId $threadOne -Title 'Target Thread')
+  [void](Write-RolloutFixture -FixtureHome $fixtureHome -ThreadId $threadTwo -Title 'Other Thread')
+  $state = Join-Path $fixtureHome 'state_5.sqlite'
+  Initialize-SessionStateFixture $state
+
+  $seed = @'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("insert into threads (id,rollout_path,cwd,title,model_provider) values (?,?,?,?,?)", (sys.argv[2], "old-one-path", "old-one-cwd", "Old One", "old_provider"))
+con.execute("insert into threads (id,rollout_path,cwd,title,model_provider) values (?,?,?,?,?)", (sys.argv[3], "old-two-path", "old-two-cwd", "Old Two", "old_provider"))
+con.commit()
+'@
+  $seed | python - $state $threadOne $threadTwo
+  if ($LASTEXITCODE -ne 0) { throw 'Failed to seed sqlite fixture.' }
+
+  Invoke-Doctor @('-Action','RepairSessionVisibility','-CodexHome',$fixtureHome,'-ProviderName','codex_local_access','-ThreadId',$threadOne,'-ThreadPathStyle','Extended')
+  $query = @'
+import json, sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.row_factory = sqlite3.Row
+row = con.execute("select rollout_path,cwd,title,model_provider from threads where id=?", (sys.argv[2],)).fetchone()
+print(json.dumps(dict(row)))
+'@
+  $rowOne = $query | python - $state $threadOne | ConvertFrom-Json
+  $rowTwo = $query | python - $state $threadTwo | ConvertFrom-Json
+  Assert ($rowOne.title -eq 'Target Thread') 'ThreadId filter should update the selected thread.'
+  Assert ($rowOne.model_provider -eq 'codex_local_access') 'ThreadId filter should update selected provider metadata.'
+  Assert ($rowOne.rollout_path.StartsWith('\\?\')) 'ThreadId filter should allow forcing selected path style.'
+  Assert ($rowTwo.title -eq 'Old Two') 'ThreadId filter should not update other thread titles.'
+  Assert ($rowTwo.model_provider -eq 'old_provider') 'ThreadId filter should not update other thread providers.'
+  Assert ($rowTwo.rollout_path -eq 'old-two-path') 'ThreadId filter should not update other thread paths.'
 }
 finally {
   Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue

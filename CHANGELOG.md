@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.2 - 2026-05-03
+
+- Adds diagnosis for `state_5.sqlite` rollout/cwd path styles (`C:\...` vs `\\?\C:\...`).
+- Adds targeted `RepairSessionVisibility -ThreadId <id>` repair for one broken thread.
+- Adds `-ThreadPathStyle Auto|Normal|Extended` to fix `cannot resume running thread ... mismatched path` errors without broad SQLite rewrites.
+- Documents the safe first fix: close and reopen Codex Desktop before attempting targeted path repair.
+- Adds smoke tests for extended-path preservation, forced extended paths, and thread-id filtering.
+
 ## v0.1.1 - 2026-05-03
 
 - Clarifies that users must run commands from the extracted project directory or pass the full script path.

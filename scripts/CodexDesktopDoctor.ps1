@@ -8,6 +8,9 @@ param(
   [string]$ProviderBaseUrl = '',
   [string]$LocalTokenEnvVar = '',
   [string]$ProviderWireApi = '',
+  [string]$ThreadId = '',
+  [ValidateSet('Auto','Normal','Extended')]
+  [string]$ThreadPathStyle = 'Auto',
 
   [switch]$FixEnv,
   [switch]$ForceEnvMigration,
@@ -349,6 +352,33 @@ print(cur.execute("select count(*) from threads").fetchone()[0])
 '@
       $count = Invoke-PythonCode $python $py @($paths.State)
       Write-Step "state_5.sqlite threads: $count"
+      $py = @'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+con.row_factory = sqlite3.Row
+counts = {
+    "rollout_extended": 0,
+    "rollout_normal": 0,
+    "cwd_extended": 0,
+    "cwd_normal": 0,
+}
+for row in con.execute("select rollout_path, cwd from threads"):
+    rollout_path = row["rollout_path"] or ""
+    cwd = row["cwd"] or ""
+    if rollout_path.startswith("\\\\?\\"):
+        counts["rollout_extended"] += 1
+    else:
+        counts["rollout_normal"] += 1
+    if cwd.startswith("\\\\?\\"):
+        counts["cwd_extended"] += 1
+    else:
+        counts["cwd_normal"] += 1
+print(counts)
+'@
+      $pathCounts = Invoke-PythonCode $python $py @($paths.State)
+      Write-Step "state_5.sqlite path styles: $pathCounts"
     } catch {
       Write-Step "state_5.sqlite threads: <unable to inspect: $($_.Exception.Message)>"
     }
@@ -670,6 +700,8 @@ home = Path(sys.argv[1])
 provider = sys.argv[2]
 dry = sys.argv[3].lower() == "true"
 backup_dir = Path(sys.argv[4])
+thread_filter = sys.argv[5].strip().lower()
+path_style = sys.argv[6]
 state = home / "state_5.sqlite"
 rollout_roots = [(home / "sessions", 0), (home / "archived_sessions", 1)]
 
@@ -691,9 +723,40 @@ def thread_id_from_path(path):
     m = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$", path.name, re.I)
     return m.group(1) if m else None
 
+def strip_extended(path):
+    path = str(path)
+    if path.startswith("\\\\?\\UNC\\"):
+        return "\\\\" + path[8:]
+    if path.startswith("\\\\?\\"):
+        return path[4:]
+    return path
+
+def to_extended(path):
+    path = str(path)
+    if path.startswith("\\\\?\\"):
+        return path
+    if path.startswith("\\\\"):
+        return "\\\\?\\UNC\\" + path.lstrip("\\")
+    if re.match(r"^[A-Za-z]:\\", path):
+        return "\\\\?\\" + path
+    return path
+
+def apply_path_style(path, existing=None):
+    if path is None:
+        return None
+    if path_style == "Extended":
+        return to_extended(path)
+    if path_style == "Normal":
+        return strip_extended(path)
+    if existing and str(existing).startswith("\\\\?\\"):
+        return to_extended(path)
+    return strip_extended(path)
+
 def summarize(path, archived):
     tid = thread_id_from_path(path)
     if not tid:
+        return None
+    if thread_filter and tid.lower() != thread_filter:
         return None
     created_ms = None
     updated_ms = None
@@ -799,6 +862,8 @@ if not dry:
 for item in items:
     row = existing.get(item["id"])
     if row is None:
+        item["rollout_path"] = apply_path_style(item.get("rollout_path"))
+        item["cwd"] = apply_path_style(item.get("cwd"))
         keys = [c for c in cols if c in item]
         placeholders = ",".join(["?"] * len(keys))
         sql = f"insert into threads ({','.join(keys)}) values ({placeholders})"
@@ -806,6 +871,8 @@ for item in items:
             con.execute(sql, [item[k] for k in keys])
         inserted += 1
     else:
+        item["rollout_path"] = apply_path_style(item.get("rollout_path"), row["rollout_path"] if "rollout_path" in cols else None)
+        item["cwd"] = apply_path_style(item.get("cwd"), row["cwd"] if "cwd" in cols else None)
         changes = {}
         for key in ("model_provider", "rollout_path", "cwd", "title", "updated_at", "updated_at_ms", "archived", "archived_at", "model", "reasoning_effort"):
             if key in cols and item.get(key) is not None and row[key] != item[key]:
@@ -823,6 +890,8 @@ manifest = {
     "createdAt": datetime.datetime.now(datetime.timezone.utc).isoformat(),
     "codexHome": str(home),
     "targetProvider": provider,
+    "threadIdFilter": thread_filter or None,
+    "threadPathStyle": path_style,
     "rolloutFilesScanned": len(items),
     "threadsInserted": inserted,
     "threadsUpdated": updated,
@@ -834,7 +903,7 @@ if not dry:
 print(json.dumps(manifest, ensure_ascii=False))
 '@
   $dryArg = if ($DryRun) { 'true' } else { 'false' }
-  $out = Invoke-PythonCode $python $py @($paths.Home, $targetProvider, $dryArg, $backup)
+  $out = Invoke-PythonCode $python $py @($paths.Home, $targetProvider, $dryArg, $backup, $ThreadId, $ThreadPathStyle)
   Write-Step "Session visibility result: $out"
 }
 

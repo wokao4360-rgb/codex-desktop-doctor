@@ -133,6 +133,39 @@ powershell -ExecutionPolicy Bypass -File .\scripts\CodexDesktopDoctor.ps1 `
   -ProviderName your_provider_name
 ```
 
+### 6. 修 `cannot resume running thread ... mismatched path`
+
+如果登录/重启后发消息弹出类似错误：
+
+```text
+cannot resume running thread ... with mismatched path:
+requested `C:\Users\...\rollout-....jsonl`,
+active `\\?\C:\Users\...\rollout-....jsonl`
+```
+
+这通常不是 OAuth 失败，而是 Codex Desktop 内存里的运行中 thread 使用了 `\\?\` 扩展路径，UI/SQLite 请求使用普通路径，或反过来。
+
+先做最安全的处理：
+
+1. 关闭 Codex Desktop。
+2. 重新打开 Codex Desktop。
+3. 回到原会话再发一条消息。
+
+如果重启后仍反复出现，可以定向修一个 thread，不要全库乱改：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\CodexDesktopDoctor.ps1 `
+  -Action RepairSessionVisibility `
+  -ThreadId 019dd73b-4d6f-7032-ae15-4c58cfeaf9ff `
+  -ThreadPathStyle Extended
+```
+
+可选值：
+
+- `-ThreadPathStyle Auto`：默认；已有 row 保持原路径风格，新 row 用普通路径。
+- `-ThreadPathStyle Extended`：写成 `\\?\C:\...`，适合 active path 是扩展路径时。
+- `-ThreadPathStyle Normal`：写成普通 `C:\...`，适合 active path 是普通路径时。
+
 ## Actions
 
 | Action | 写文件 | Purpose |
