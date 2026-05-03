@@ -22,10 +22,13 @@ Codex Desktop 本地修复工具。普通用户只需要下载一个文件，双
 - 当前 provider 的 `requires_openai_auth = true`
 - `[features] remote_control = false`
 
+注意：如果输出里显示 `auth_mode: apikey`，插件仍会灰。脚本不能替你生成 ChatGPT/OAuth 登录态；需要在 Codex Desktop 里退出 API key 登录，然后用 ChatGPT/OAuth 重新登录。登录后模型 provider 仍可继续指向你的本地 API。
+
 ## 适合修什么
 
 - 使用本地 API / cc switch / claude-code-router / Cockpit/Cocktail 后，Codex 插件、connector、skills 变灰。
 - ChatGPT/OAuth 已登录，但本地模型 provider 还要继续走自己的 OpenAI-compatible API。
+- 诊断当前是不是被 API key 登录态卡住。
 - Cloudflare MCP 配置或会话列表需要手动修时，也可以用同一个文件带参数运行。
 
 ## 高级用法

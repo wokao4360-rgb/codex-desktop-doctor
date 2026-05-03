@@ -17,6 +17,7 @@ if "%~1"=="" (
   set "CDD_EXIT=!ERRORLEVEL!"
   del "%CDD_TEMP%" >nul 2>nul
   echo.
+  echo If plugins are still grey and the output says auth_mode: apikey, log out in Codex Desktop and sign in with ChatGPT/OAuth, then keep your local provider selected.
   echo Done. Press any key to close this window.
   pause >nul
   exit /b !CDD_EXIT!
@@ -305,12 +306,32 @@ function Resolve-TargetProvider([hashtable]$Paths) {
   throw 'No active model_provider was found. Re-run with -ProviderName, and pass -ProviderBaseUrl if the provider section must be created.'
 }
 
+function Get-CodexAuthMode([hashtable]$Paths) {
+  $auth = Get-JsonObject $Paths.Auth
+  if (-not $auth) { return '<missing>' }
+  $mode = [string](Get-ObjectPropertyValue $auth 'auth_mode' '<unset>')
+  if ([string]::IsNullOrWhiteSpace($mode)) { return '<unset>' }
+  return $mode
+}
+
+function Write-AuthModeDiagnosis([hashtable]$Paths) {
+  $mode = Get-CodexAuthMode $Paths
+  Write-Step "auth_mode: $mode"
+  if ($mode -match '^(?i:apikey)$') {
+    Write-Step 'WARNING: Codex is logged in with an API key. Plugins/connectors/skills UI require ChatGPT/OAuth login, so config repair alone cannot un-grey them.'
+    Write-Step 'Next step: in Codex Desktop choose Settings -> Log out, then sign in with ChatGPT/OAuth. Keep your local model_provider/base_url unchanged after login.'
+  } elseif ($mode -match '^(?i:chatgpt)$') {
+    Write-Step 'auth_mode check: ChatGPT/OAuth login is present; plugin UI auth prerequisite is satisfied.'
+  }
+}
+
 function Invoke-Diagnose {
   $paths = Get-Paths
   Write-Step "Codex home: $($paths.Home)"
   foreach ($k in @('Config','Auth','Credentials','State','Sessions','ArchivedSessions')) {
     Write-Step ("{0}: {1}" -f $k, (Test-Path -LiteralPath $paths[$k]))
   }
+  Write-AuthModeDiagnosis $paths
 
   $config = Read-TextFile $paths.Config
   $provider = Get-TopTomlString $config 'model_provider'
@@ -458,6 +479,7 @@ function Repair-PluginUi {
   $content = Set-TomlSection $content 'features' $features
   Write-TextFile $paths.Config $content
   Write-Step "Plugin UI config repaired for provider '$targetProvider'."
+  Write-AuthModeDiagnosis $paths
 
   if ($FixEnv) {
     $effectiveTokenEnvVar = $LocalTokenEnvVar

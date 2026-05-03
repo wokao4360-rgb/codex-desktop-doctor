@@ -168,6 +168,31 @@ finally {
   Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+Write-Test 'Diagnose warns for API key auth fixture'
+$fixtureHome = New-FixtureHome 'apikey-auth'
+try {
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value @'
+model_provider = "local_provider"
+
+[model_providers.local_provider]
+name = "local_provider"
+base_url = "http://127.0.0.1:9999/v1"
+requires_openai_auth = true
+'@
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'auth.json') -Encoding UTF8 -Value (@{
+    auth_mode = 'apikey'
+    OPENAI_API_KEY = 'agt_test_redacted'
+  } | ConvertTo-Json)
+  $output = & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $Doctor -Action Diagnose -CodexHome $fixtureHome 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "Diagnose exited with code $LASTEXITCODE`: $($output | Out-String)" }
+  $text = $output | Out-String
+  Assert ($text -match 'auth_mode:\s*apikey') 'Diagnose did not report API key auth mode.'
+  Assert ($text -match 'Plugins/connectors/skills UI require ChatGPT/OAuth login') 'Diagnose did not explain why API key auth keeps plugins grey.'
+}
+finally {
+  Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Test 'RepairCloudflareMcp fixture'
 $fixtureHome = New-FixtureHome 'cloudflare'
 try {

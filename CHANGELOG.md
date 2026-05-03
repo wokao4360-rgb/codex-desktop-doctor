@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.4 - 2026-05-03
+
+- Diagnoses `auth_mode` from `auth.json`.
+- Warns when Codex is logged in with an API key, because plugins/connectors/skills UI still require ChatGPT/OAuth login.
+- One-click CMD now prints the OAuth reminder after repair so users know what to do if plugins stay grey.
+- README clarifies that the tool repairs config but cannot create ChatGPT/OAuth credentials by itself.
+
 ## v0.1.3 - 2026-05-03
 
 - Changes the public release format to one standalone `CodexDesktopDoctor.cmd` asset.
