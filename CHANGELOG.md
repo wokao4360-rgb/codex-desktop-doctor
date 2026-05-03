@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.3 - 2026-05-03
+
+- Changes the public release format to one standalone `CodexDesktopDoctor.cmd` asset.
+- The standalone CMD embeds the PowerShell doctor, so users no longer need to download a zip, extract files, or `cd` into a folder.
+- Double-click default is now one-click `RepairPluginUi`.
+- Removes extra root helper CMD files and simplifies the README to essential usage only.
+
 ## v0.1.2 - 2026-05-03
 
 - Adds diagnosis for `state_5.sqlite` rollout/cwd path styles (`C:\...` vs `\\?\C:\...`).

@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $Doctor = Join-Path $RepoRoot 'scripts\CodexDesktopDoctor.ps1'
+$Standalone = Join-Path $RepoRoot 'CodexDesktopDoctor.cmd'
 $PowerShellExe = (Get-Process -Id $PID).Path
 $WindowsPowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
@@ -141,6 +142,27 @@ requires_openai_auth = false
   Assert ($config -match '\[model_providers\.codex_local_access\]') 'explicit provider section was not created.'
   Assert ($config -match 'env_key\s*=\s*"CODEX_LOCAL_ACCESS_TOKEN"') 'explicit env_key was not written.'
   Assert ($config -match 'wire_api\s*=\s*"responses"') 'explicit wire_api was not written.'
+}
+finally {
+  Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Test 'Standalone CMD Diagnose fixture'
+$fixtureHome = New-FixtureHome 'standalone-cmd'
+try {
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value @'
+model_provider = "standalone_provider"
+
+[model_providers.standalone_provider]
+name = "standalone_provider"
+base_url = "http://127.0.0.1:9999/v1"
+requires_openai_auth = false
+'@
+  $output = & cmd /c "`"$Standalone`" -Action Diagnose -CodexHome `"$fixtureHome`"" 2>&1
+  if ($LASTEXITCODE -ne 0) { throw "Standalone CMD exited with code $LASTEXITCODE`: $($output | Out-String)" }
+  $text = $output | Out-String
+  Assert ($text -match 'model_provider:\s*standalone_provider') 'Standalone CMD did not run the embedded Diagnose action.'
+  Assert ($text -match 'provider\.base_url:\s*http://127\.0\.0\.1:9999/v1') 'Standalone CMD did not pass arguments correctly.'
 }
 finally {
   Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
