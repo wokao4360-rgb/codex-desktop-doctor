@@ -1,0 +1,13 @@
+.doctor-backups/
+*.log
+*.tmp
+*.bak
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.env
+secrets/
+auth.json
+.credentials.json
+config.local.toml
+state_*.sqlite
