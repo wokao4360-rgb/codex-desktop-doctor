@@ -245,6 +245,16 @@ function Find-Python {
   throw 'Python 3 is required for this action but was not found on PATH.'
 }
 
+function Invoke-PythonCode([string]$PythonExe, [string]$Code, [string[]]$Arguments = @()) {
+  $tempScript = Join-Path ([IO.Path]::GetTempPath()) ("codex-desktop-doctor-{0}.py" -f [guid]::NewGuid().ToString('N'))
+  Set-Content -LiteralPath $tempScript -Value $Code -Encoding UTF8
+  try {
+    return & $PythonExe $tempScript @Arguments
+  } finally {
+    Remove-Item -LiteralPath $tempScript -Force -ErrorAction SilentlyContinue
+  }
+}
+
 function Resolve-TargetProvider([hashtable]$Paths) {
   if (-not [string]::IsNullOrWhiteSpace($ProviderName)) {
     Assert-TomlBareKeyPath $ProviderName 'ProviderName'
@@ -329,8 +339,15 @@ function Invoke-Diagnose {
   if (Test-Path -LiteralPath $paths.State) {
     try {
       $python = Find-Python
-      $py = 'import sqlite3,sys; con=sqlite3.connect(sys.argv[1]); cur=con.cursor(); print(cur.execute("select count(*) from threads").fetchone()[0])'
-      $count = & $python -c $py $paths.State
+      $py = @'
+import sqlite3
+import sys
+
+con = sqlite3.connect(sys.argv[1])
+cur = con.cursor()
+print(cur.execute("select count(*) from threads").fetchone()[0])
+'@
+      $count = Invoke-PythonCode $python $py @($paths.State)
       Write-Step "state_5.sqlite threads: $count"
     } catch {
       Write-Step "state_5.sqlite threads: <unable to inspect: $($_.Exception.Message)>"
@@ -447,7 +464,7 @@ for name in ("logs_2.sqlite", "logs_1.sqlite"):
     except Exception:
         pass
 '@
-    $out = & $python -c $py $paths.Home $ServerName 2>$null
+    $out = Invoke-PythonCode $python $py @($paths.Home, $ServerName) 2>$null
     if ($out) { return [string]($out | Select-Object -First 1) }
   } catch {
     # Fall through to official Cloudflare plugin default seen in current Codex Desktop builds.
@@ -817,7 +834,7 @@ if not dry:
 print(json.dumps(manifest, ensure_ascii=False))
 '@
   $dryArg = if ($DryRun) { 'true' } else { 'false' }
-  $out = & $python -c $py $paths.Home $targetProvider $dryArg $backup
+  $out = Invoke-PythonCode $python $py @($paths.Home, $targetProvider, $dryArg, $backup)
   Write-Step "Session visibility result: $out"
 }
 

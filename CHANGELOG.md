@@ -1,5 +1,10 @@
 # Changelog
 
+## v0.1.1 - 2026-05-03
+
+- Clarifies that users must run commands from the extracted project directory or pass the full script path.
+- Adds root helper launchers: `CodexDesktopDoctor.cmd`, `Run-Diagnose.cmd`, and `Run-RepairPluginUi.cmd`.
+- Fixes Windows PowerShell 5.1 compatibility for the SQLite thread-count diagnosis.
 ## v0.1.0 - 2026-05-03
 
 - First public release.

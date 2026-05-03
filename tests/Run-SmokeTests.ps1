@@ -7,6 +7,7 @@ $ErrorActionPreference = 'Stop'
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $PSCommandPath)
 $Doctor = Join-Path $RepoRoot 'scripts\CodexDesktopDoctor.ps1'
 $PowerShellExe = (Get-Process -Id $PID).Path
+$WindowsPowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
 
 function Write-Test($Name) {
   Write-Host "== $Name =="
@@ -196,6 +197,39 @@ con.commit()
 }
 finally {
   Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Test 'Windows PowerShell Diagnose compatibility'
+if (Test-Path -LiteralPath $WindowsPowerShellExe) {
+  $fixtureHome = New-FixtureHome 'winps'
+  try {
+    Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value @'
+model_provider = "winps_provider"
+
+[model_providers.winps_provider]
+name = "winps_provider"
+base_url = "http://127.0.0.1:9876/v1"
+requires_openai_auth = true
+'@
+    $state = Join-Path $fixtureHome 'state_5.sqlite'
+    $schema = @'
+import sqlite3, sys
+con = sqlite3.connect(sys.argv[1])
+con.execute("create table threads (id text primary key)")
+con.execute("insert into threads (id) values ('winps-smoke')")
+con.commit()
+'@
+    $schema | python - $state
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to create Windows PowerShell sqlite fixture.' }
+    $output = & $WindowsPowerShellExe -NoProfile -ExecutionPolicy Bypass -File $Doctor -Action Diagnose -CodexHome $fixtureHome 2>&1
+    if ($LASTEXITCODE -ne 0) { throw "Windows PowerShell Diagnose exited with code $LASTEXITCODE`: $($output | Out-String)" }
+    Assert (($output | Out-String) -match 'state_5\.sqlite threads:\s*1') 'Windows PowerShell Diagnose did not report the sqlite thread count.'
+  }
+  finally {
+    Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+  }
+} else {
+  Write-Host 'Windows PowerShell not found; skipping.'
 }
 
 Write-Host 'All smoke tests passed.'

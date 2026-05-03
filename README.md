@@ -12,10 +12,22 @@ Windows-first repair toolkit for **OpenAI Codex Desktop** local setups.
 
 - [Latest Release](https://github.com/wokao4360-rgb/codex-desktop-doctor/releases/latest)
 
-解压后运行：
+解压后先进入解压目录，再运行：
 
 ```powershell
+cd "你的解压目录\codex-desktop-doctor"
 powershell -ExecutionPolicy Bypass -File .\scripts\CodexDesktopDoctor.ps1 -Action Diagnose
+```
+
+也可以直接双击解压目录里的：
+
+- `Run-Diagnose.cmd`：只诊断
+- `Run-RepairPluginUi.cmd`：修插件 UI 灰掉
+
+如果你不想 `cd`，就必须写脚本的完整路径，例如：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "D:\Projects\codex-desktop-doctor\scripts\CodexDesktopDoctor.ps1" -Action Diagnose
 ```
 
 ## 它能修什么 / What It Fixes
@@ -37,8 +49,16 @@ powershell -ExecutionPolicy Bypass -File .\scripts\CodexDesktopDoctor.ps1 -Actio
 
 ### 1. 先诊断，不写文件
 
+进入项目/解压目录后：
+
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\CodexDesktopDoctor.ps1 -Action Diagnose
+```
+
+或者从任意目录用完整路径：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File "D:\Projects\codex-desktop-doctor\scripts\CodexDesktopDoctor.ps1" -Action Diagnose
 ```
 
 诊断会列出当前 active provider，以及所有 `[model_providers.*]` 的 `base_url` 和 `requires_openai_auth` 状态。
