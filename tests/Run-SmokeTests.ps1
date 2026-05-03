@@ -194,6 +194,40 @@ finally {
   Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
 }
 
+Write-Test 'RepairBrowserUsePlugin restores config and cache fixture'
+$fixtureHome = New-FixtureHome 'browser-use'
+$bundledRoot = New-FixtureHome 'browser-use-bundled'
+try {
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value @'
+model_provider = "local_provider"
+
+[model_providers.local_provider]
+name = "local_provider"
+base_url = "http://127.0.0.1:9999/v1"
+requires_openai_auth = true
+'@
+  $source = Join-Path $bundledRoot 'plugins\browser-use'
+  New-Item -ItemType Directory -Force -Path (Join-Path $source '.codex-plugin') | Out-Null
+  New-Item -ItemType Directory -Force -Path (Join-Path $source 'skills\browser') | Out-Null
+  Set-Content -LiteralPath (Join-Path $source '.codex-plugin\plugin.json') -Encoding UTF8 -Value (@{
+    name = 'browser-use'
+    version = '0.1.0-test'
+    skills = './skills/'
+  } | ConvertTo-Json)
+  Set-Content -LiteralPath (Join-Path $source 'skills\browser\SKILL.md') -Encoding UTF8 -Value '# Browser fixture'
+
+  Invoke-Doctor @('-Action','RepairBrowserUsePlugin','-CodexHome',$fixtureHome,'-BundledPluginRoot',$bundledRoot)
+  $config = Get-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Raw
+  Assert ($config -match '\[plugins\."browser-use@openai-bundled"\]') 'Browser Use plugin section was not created.'
+  Assert ($config -match 'enabled\s*=\s*true') 'Browser Use plugin was not enabled.'
+  $manifest = Join-Path $fixtureHome 'plugins\cache\openai-bundled\browser-use\0.1.0-test\.codex-plugin\plugin.json'
+  Assert (Test-Path -LiteralPath $manifest) 'Browser Use plugin cache was not restored from bundled source.'
+}
+finally {
+  Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -LiteralPath $bundledRoot -Recurse -Force -ErrorAction SilentlyContinue
+}
+
 Write-Test 'RepairCloudflareMcp fixture'
 $fixtureHome = New-FixtureHome 'cloudflare'
 try {

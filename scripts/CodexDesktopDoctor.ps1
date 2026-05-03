@@ -1,6 +1,6 @@
 ﻿[CmdletBinding()]
 param(
-  [ValidateSet('Diagnose','RepairPluginUi','RepairCloudflareMcp','RepairSessionVisibility','RepairAll')]
+  [ValidateSet('Diagnose','RepairPluginUi','RepairBrowserUsePlugin','RepairCloudflareMcp','RepairSessionVisibility','RepairAll')]
   [string]$Action = 'Diagnose',
 
   [string]$CodexHome = (Join-Path $env:USERPROFILE '.codex'),
@@ -21,6 +21,7 @@ param(
   [int]$CloudflareCallbackTimeoutSec = 300,
   [string]$CloudflareUserAgent = 'curl/8.15.0',
   [switch]$NoBrowser,
+  [string]$BundledPluginRoot = '',
 
   [switch]$DryRun
 )
@@ -119,6 +120,7 @@ function Get-Paths {
     State = Join-Path $codexRoot 'state_5.sqlite'
     Sessions = Join-Path $codexRoot 'sessions'
     ArchivedSessions = Join-Path $codexRoot 'archived_sessions'
+    PluginCache = Join-Path $codexRoot 'plugins\cache'
     BackupRoot = Join-Path $codexRoot 'doctor-backups'
   }
 }
@@ -197,6 +199,33 @@ function Set-TomlSection([string]$Content, [string]$SectionName, [string]$Sectio
   Assert-TomlBareKeyPath $SectionName 'TOML section name'
   $pattern = '(?ms)^\[' + [regex]::Escape($SectionName) + '\]\r?\n.*?(?=^\[|\z)'
   $section = '[' + $SectionName + "]`r`n" + $SectionBody.Trim() + "`r`n"
+  if ([regex]::IsMatch($Content, $pattern)) {
+    return [regex]::Replace($Content, $pattern, $section, 1)
+  }
+  if (-not $Content.EndsWith("`n")) { $Content += "`r`n" }
+  return $Content.TrimEnd() + "`r`n`r`n" + $section
+}
+
+function Assert-PluginId([string]$PluginId) {
+  if ([string]::IsNullOrWhiteSpace($PluginId) -or $PluginId -notmatch '^[A-Za-z0-9_.@-]+$') {
+    throw "插件 ID 不安全 / unsafe plugin id: $PluginId"
+  }
+}
+
+function Get-PluginSection([string]$Content, [string]$PluginId) {
+  Assert-PluginId $PluginId
+  $sectionName = 'plugins."' + $PluginId + '"'
+  $pattern = '(?ms)^\[' + [regex]::Escape($sectionName) + '\]\r?\n(.*?)(?=^\[|\z)'
+  $m = [regex]::Match($Content, $pattern)
+  if ($m.Success) { return $m.Groups[1].Value }
+  return $null
+}
+
+function Set-PluginSection([string]$Content, [string]$PluginId, [string]$SectionBody) {
+  Assert-PluginId $PluginId
+  $sectionName = 'plugins."' + $PluginId + '"'
+  $pattern = '(?ms)^\[' + [regex]::Escape($sectionName) + '\]\r?\n.*?(?=^\[|\z)'
+  $section = '[' + $sectionName + "]`r`n" + $SectionBody.Trim() + "`r`n"
   if ([regex]::IsMatch($Content, $pattern)) {
     return [regex]::Replace($Content, $pattern, $section, 1)
   }
@@ -293,10 +322,145 @@ function Write-AuthModeDiagnosis([hashtable]$Paths) {
   }
 }
 
+function Get-BrowserUseCacheManifests([hashtable]$Paths) {
+  $base = Join-Path $Paths.PluginCache 'openai-bundled\browser-use'
+  $manifests = @()
+  if (Test-Path -LiteralPath $base) {
+    foreach ($dir in @(Get-ChildItem -LiteralPath $base -Directory -ErrorAction SilentlyContinue)) {
+      $manifest = Join-Path $dir.FullName '.codex-plugin\plugin.json'
+      if (Test-Path -LiteralPath $manifest) { $manifests += $manifest }
+    }
+  }
+  return $manifests
+}
+
+function Get-BrowserUseManifestVersion([string]$ManifestPath) {
+  try {
+    $json = Get-JsonObject $ManifestPath
+    $name = [string](Get-ObjectPropertyValue $json 'name' '')
+    $version = [string](Get-ObjectPropertyValue $json 'version' '')
+    if ($name -eq 'browser-use' -and -not [string]::IsNullOrWhiteSpace($version)) {
+      return $version
+    }
+  } catch {
+    return ''
+  }
+  return ''
+}
+
+function Test-BrowserUseSource([string]$Path) {
+  if ([string]::IsNullOrWhiteSpace($Path)) { return $false }
+  $manifest = Join-Path $Path '.codex-plugin\plugin.json'
+  return (Test-Path -LiteralPath $manifest) -and [bool](Get-BrowserUseManifestVersion $manifest)
+}
+
+function Find-BrowserUseBundledSource {
+  $candidates = @()
+  if (-not [string]::IsNullOrWhiteSpace($BundledPluginRoot)) {
+    $root = [IO.Path]::GetFullPath($BundledPluginRoot)
+    $candidates += $root
+    $candidates += (Join-Path $root 'plugins\browser-use')
+    $candidates += (Join-Path $root 'openai-bundled\plugins\browser-use')
+    $candidates += (Join-Path $root 'app\resources\plugins\openai-bundled\plugins\browser-use')
+  }
+
+  $localPrograms = Join-Path $env:LOCALAPPDATA 'Programs'
+  if (Test-Path -LiteralPath $localPrograms) {
+    foreach ($dir in @(Get-ChildItem -LiteralPath $localPrograms -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like '*Codex*' })) {
+      $candidates += (Join-Path $dir.FullName 'resources\plugins\openai-bundled\plugins\browser-use')
+      $candidates += (Join-Path $dir.FullName 'app\resources\plugins\openai-bundled\plugins\browser-use')
+    }
+  }
+
+  $windowsApps = Join-Path $env:ProgramFiles 'WindowsApps'
+  if (Test-Path -LiteralPath $windowsApps) {
+    foreach ($dir in @(Get-ChildItem -LiteralPath $windowsApps -Directory -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'OpenAI.Codex_*' } | Sort-Object LastWriteTime -Descending)) {
+      $candidates += (Join-Path $dir.FullName 'app\resources\plugins\openai-bundled\plugins\browser-use')
+    }
+  }
+
+  foreach ($candidate in $candidates) {
+    if (Test-BrowserUseSource $candidate) { return $candidate }
+  }
+  return ''
+}
+
+function Write-BrowserUseDiagnosis([hashtable]$Paths, [string]$Config) {
+  $section = Get-PluginSection $Config 'browser-use@openai-bundled'
+  $enabled = if ($section -match '(?m)^enabled\s*=\s*(true|false)') { $Matches[1] } else { '<unset>' }
+  Write-Step ("Browser Use 配置 / browser-use plugin config: {0}; enabled={1}" -f [bool]$section, $enabled)
+
+  $manifests = @(Get-BrowserUseCacheManifests $Paths)
+  $versions = @()
+  foreach ($manifest in $manifests) {
+    $version = Get-BrowserUseManifestVersion $manifest
+    if ($version) { $versions += $version }
+  }
+  $versionText = if ($versions.Count -gt 0) { ($versions -join ',') } else { '<none>' }
+  Write-Step ("Browser Use 缓存 / browser-use plugin cache: {0}; versions={1}" -f ($manifests.Count -gt 0), $versionText)
+}
+
+function Repair-BrowserUsePlugin {
+  $paths = Get-Paths
+  if (-not (Test-Path -LiteralPath $paths.Config)) { throw "未找到 config.toml / config.toml not found: $($paths.Config)" }
+  if (-not [string]::IsNullOrWhiteSpace($BundledPluginRoot)) { Assert-NoControlChars $BundledPluginRoot 'BundledPluginRoot' }
+
+  $backup = New-BackupSet $paths 'browser-use-plugin'
+  Backup-File $paths.Config $backup | Out-Null
+
+  $content = Read-TextFile $paths.Config
+  $body = Get-PluginSection $content 'browser-use@openai-bundled'
+  if ([string]::IsNullOrWhiteSpace($body)) { $body = '' }
+  $body = Set-SectionKeyValue $body 'enabled' 'true'
+  $content = Set-PluginSection $content 'browser-use@openai-bundled' $body
+  Write-TextFile $paths.Config $content
+  Write-Step 'Browser Use 配置已启用 / Browser Use plugin config enabled.'
+
+  $manifests = @(Get-BrowserUseCacheManifests $paths)
+  if ($manifests.Count -gt 0) {
+    Write-Step ("Browser Use 插件缓存已存在 / Browser Use plugin cache already exists: {0}" -f ($manifests -join '; '))
+    return
+  }
+
+  $source = Find-BrowserUseBundledSource
+  if ([string]::IsNullOrWhiteSpace($source)) {
+    Write-Step '警告 / WARNING: 未找到官方内置 Browser Use 插件包。请更新/重装 Codex Desktop 后再运行本脚本。'
+    Write-Step 'WARNING: bundled Browser Use plugin package was not found. Update/reinstall Codex Desktop, then run this script again.'
+    return
+  }
+
+  $sourceManifest = Join-Path $source '.codex-plugin\plugin.json'
+  $version = Get-BrowserUseManifestVersion $sourceManifest
+  if ([string]::IsNullOrWhiteSpace($version)) {
+    Write-Step "警告 / WARNING: Browser Use manifest 无法读取版本 / cannot read version: $sourceManifest"
+    return
+  }
+  if ($version -notmatch '^[A-Za-z0-9_.-]+$') {
+    throw "Browser Use 版本号不安全 / unsafe Browser Use version: $version"
+  }
+
+  $dest = Join-Path $paths.PluginCache ("openai-bundled\browser-use\{0}" -f $version)
+  $cacheBase = [IO.Path]::GetFullPath((Join-Path $paths.PluginCache 'openai-bundled\browser-use'))
+  $resolvedDest = [IO.Path]::GetFullPath($dest)
+  if (-not $resolvedDest.StartsWith($cacheBase, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Browser Use 目标路径不安全 / unsafe Browser Use destination: $resolvedDest"
+  }
+  if ($DryRun) {
+    Write-Step "演练模式：不会复制 Browser Use 插件 / DryRun: would copy Browser Use plugin: $source -> $dest"
+    return
+  }
+  New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest) | Out-Null
+  if (Test-Path -LiteralPath $dest) {
+    Remove-Item -LiteralPath $dest -Recurse -Force
+  }
+  Copy-Item -LiteralPath $source -Destination $dest -Recurse -Force
+  Write-Step "Browser Use 插件缓存已恢复 / Browser Use plugin cache restored: $dest"
+}
+
 function Invoke-Diagnose {
   $paths = Get-Paths
   Write-Step "Codex 目录 / Codex home: $($paths.Home)"
-  foreach ($k in @('Config','Auth','Credentials','State','Sessions','ArchivedSessions')) {
+  foreach ($k in @('Config','Auth','Credentials','State','Sessions','ArchivedSessions','PluginCache')) {
     Write-Step ("{0}: {1}" -f $k, (Test-Path -LiteralPath $paths[$k]))
   }
   Write-AuthModeDiagnosis $paths
@@ -330,6 +494,8 @@ function Invoke-Diagnose {
       Write-Step ("provider 明细 / provider {0} {1}: base_url={2}; requires_openai_auth={3}" -f $marker, $name, $baseUrl, $requires)
     }
   }
+
+  Write-BrowserUseDiagnosis $paths $config
 
   $cfSection = Get-TomlSection $config 'mcp_servers.cloudflare-api'
   Write-Step ("Cloudflare MCP 配置 / cloudflare-api MCP config: {0}" -f [bool]$cfSection)
@@ -931,10 +1097,12 @@ print(json.dumps(manifest, ensure_ascii=False))
 switch ($Action) {
   'Diagnose' { Invoke-Diagnose }
   'RepairPluginUi' { Repair-PluginUi; Invoke-Diagnose }
+  'RepairBrowserUsePlugin' { Repair-BrowserUsePlugin; Invoke-Diagnose }
   'RepairCloudflareMcp' { Repair-CloudflareMcp; Invoke-Diagnose }
   'RepairSessionVisibility' { Repair-SessionVisibility; Invoke-Diagnose }
   'RepairAll' {
     Repair-PluginUi
+    Repair-BrowserUsePlugin
     Repair-CloudflareMcp
     Repair-SessionVisibility
     Invoke-Diagnose

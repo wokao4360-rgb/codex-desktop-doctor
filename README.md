@@ -17,20 +17,29 @@
 
 这个工具修的是 Codex Desktop 本地配置冲突，不会替你生成 ChatGPT/OAuth 登录态。
 
+**如果报“未找到浏览器插件 / Browser plugin not found”：**
+
+- 先关闭 Codex Desktop，再双击脚本。
+- 脚本会启用 `browser-use@openai-bundled`，并尝试从 Codex Desktop 官方内置目录恢复 Browser Use 插件缓存。
+- 如果输出提示找不到官方内置插件包，先更新或重装 Codex Desktop，再重新运行脚本。
+
 ## 它修什么 / What it fixes
 
 - 本地 API / cc switch / claude-code-router / Cockpit/Cocktail 后，插件、connector、skills 变灰。
+- Browser Use 显示“未找到浏览器插件”或配置丢失。
 - provider 配置需要保持本地 API，但插件 UI 需要 ChatGPT/OAuth 登录态。
 - Cloudflare MCP 配置问题。
 - 历史会话不可见，或 `cannot resume running thread ... mismatched path`。
 
 ## 默认双击会做什么
 
-双击默认执行 `RepairPluginUi`：
+双击默认执行核心修复：`RepairPluginUi` + `RepairBrowserUsePlugin`。
 
 - 保留当前 `model_provider` 和 `base_url`。
 - 设置当前 provider：`requires_openai_auth = true`。
 - 设置 `[features] remote_control = false`。
+- 启用 `[plugins."browser-use@openai-bundled"]`。
+- 如 Browser Use 缓存缺失，尝试从 Codex Desktop 安装目录复制官方内置插件。
 - 显示中/英文混合诊断，重点看 `auth_mode`。
 
 ## 命令行高级用法
@@ -40,6 +49,7 @@
 ```powershell
 .\CodexDesktopDoctor.cmd -Action Diagnose
 .\CodexDesktopDoctor.cmd -Action RepairPluginUi
+.\CodexDesktopDoctor.cmd -Action RepairBrowserUsePlugin
 .\CodexDesktopDoctor.cmd -Action RepairCloudflareMcp -CloudflareOAuth
 .\CodexDesktopDoctor.cmd -Action RepairSessionVisibility
 .\CodexDesktopDoctor.cmd -Action RepairSessionVisibility -ThreadId <thread-id> -ThreadPathStyle Extended

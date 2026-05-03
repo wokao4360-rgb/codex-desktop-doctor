@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.6 - 2026-05-03
+
+- Adds `RepairBrowserUsePlugin` for the "Browser plugin not found" / "未找到浏览器插件" failure.
+- Diagnoses Browser Use config and plugin cache status.
+- One-click CMD now runs both plugin UI repair and Browser Use repair.
+- Can restore Browser Use cache from the official bundled Codex Desktop plugin directory when available.
+
 ## v0.1.5 - 2026-05-03
 
 - Makes the standalone CMD and key PowerShell diagnostics bilingual Chinese/English.
