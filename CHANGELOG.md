@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.5 - 2026-05-03
+
+- Makes the standalone CMD and key PowerShell diagnostics bilingual Chinese/English.
+- Moves the most important success path and `auth_mode` decision tree to the top of README.
+- Keeps README short and focused on the one-file download, double-click flow, and OAuth failure branch.
+- Adds smoke coverage that API key auth warnings include Chinese guidance.
+
 ## v0.1.4 - 2026-05-03
 
 - Diagnoses `auth_mode` from `auth.json`.

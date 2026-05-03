@@ -188,6 +188,7 @@ requires_openai_auth = true
   $text = $output | Out-String
   Assert ($text -match 'auth_mode:\s*apikey') 'Diagnose did not report API key auth mode.'
   Assert ($text -match 'Plugins/connectors/skills UI require ChatGPT/OAuth login') 'Diagnose did not explain why API key auth keeps plugins grey.'
+  Assert ($text -match '当前是 API key 登录') 'Diagnose did not include Chinese API key auth guidance.'
 }
 finally {
   Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue

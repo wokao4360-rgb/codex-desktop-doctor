@@ -1,24 +1,26 @@
 @echo off
+chcp 65001 >nul
 setlocal EnableExtensions EnableDelayedExpansion
 set "CDD_SELF=%~f0"
 set "CDD_TEMP=%TEMP%\CodexDesktopDoctor-%RANDOM%-%RANDOM%.ps1"
 
-powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $self=$env:CDD_SELF; $out=$env:CDD_TEMP; $lines=Get-Content -LiteralPath $self; $marker='###CODEX_DESKTOP_DOCTOR_PS1###'; $idx=[Array]::IndexOf($lines,$marker); if($idx -lt 0){ throw 'payload marker not found' }; $payload=$lines[($idx+1)..($lines.Count-1)]; Set-Content -LiteralPath $out -Value $payload -Encoding UTF8"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $self=$env:CDD_SELF; $out=$env:CDD_TEMP; $lines=Get-Content -LiteralPath $self -Encoding UTF8; $marker='###CODEX_DESKTOP_DOCTOR_PS1###'; $idx=[Array]::IndexOf($lines,$marker); if($idx -lt 0){ throw 'payload marker not found' }; $payload=$lines[($idx+1)..($lines.Count-1)]; Set-Content -LiteralPath $out -Value $payload -Encoding UTF8"
 if errorlevel 1 (
-  echo Failed to extract embedded PowerShell script.
+  echo 提取内置脚本失败 / Failed to extract embedded PowerShell script.
   pause
   exit /b 1
 )
 
 if "%~1"=="" (
-  echo Codex Desktop Doctor one-click mode: RepairPluginUi
-  echo Tip: close Codex Desktop first, run this file, then reopen Codex Desktop.
+  echo Codex Desktop Doctor 一键修复模式 / one-click mode: RepairPluginUi
+  echo 建议：先关闭 Codex Desktop，运行本文件，完成后重新打开 / Tip: close Codex Desktop first, run this file, then reopen Codex Desktop.
   powershell -NoProfile -ExecutionPolicy Bypass -File "%CDD_TEMP%" -Action RepairPluginUi
   set "CDD_EXIT=!ERRORLEVEL!"
   del "%CDD_TEMP%" >nul 2>nul
   echo.
-  echo If plugins are still grey and the output says auth_mode: apikey, log out in Codex Desktop and sign in with ChatGPT/OAuth, then keep your local provider selected.
-  echo Done. Press any key to close this window.
+  echo 如果插件仍然是灰色，并且输出显示 auth_mode: apikey：请在 Codex Desktop 退出 API key 登录，再用 ChatGPT/OAuth 登录。
+  echo If plugins are still grey and the output says auth_mode: apikey: log out in Codex Desktop and sign in with ChatGPT/OAuth.
+  echo 完成 / Done. Press any key to close this window.
   pause >nul
   exit /b !CDD_EXIT!
 ) else (
@@ -125,19 +127,19 @@ function ConvertTo-TomlString([string]$Value) {
 
 function Assert-TomlBareKeyPath([string]$Value, [string]$Name) {
   if ([string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch '^[A-Za-z0-9_.-]+$') {
-    throw "$Name contains characters that cannot be safely written as a TOML bare key path: $Value"
+    throw "$Name 包含不安全字符，不能写入 TOML bare key path / contains characters that cannot be safely written as a TOML bare key path: $Value"
   }
 }
 
 function Assert-EnvVarName([string]$Value, [string]$Name) {
   if ([string]::IsNullOrWhiteSpace($Value) -or $Value -notmatch '^[A-Za-z_][A-Za-z0-9_]*$') {
-    throw "$Name is not a safe environment variable name: $Value"
+    throw "$Name 不是安全的环境变量名 / is not a safe environment variable name: $Value"
   }
 }
 
 function Assert-NoControlChars([string]$Value, [string]$Name) {
   if ($null -ne $Value -and $Value -match "[`r`n]") {
-    throw "$Name must not contain newlines."
+    throw "$Name 不能包含换行 / must not contain newlines."
   }
 }
 
@@ -181,9 +183,9 @@ function Backup-File([string]$Path, [string]$BackupSet, [switch]$RedactSecrets) 
     }
   }
   if ($RedactSecrets) {
-    Write-Step "Redacted backup: $Path -> $dest"
+    Write-Step "已备份(脱敏) / Redacted backup: $Path -> $dest"
   } else {
-    Write-Step "Backup: $Path -> $dest"
+    Write-Step "已备份 / Backup: $Path -> $dest"
   }
   return $dest
 }
@@ -195,7 +197,7 @@ function Read-TextFile([string]$Path) {
 
 function Write-TextFile([string]$Path, [string]$Content) {
   if ($DryRun) {
-    Write-Step "DryRun: would write $Path"
+    Write-Step "演练模式：不会写入 / DryRun: would write $Path"
     return
   }
   Set-Content -LiteralPath $Path -Value $Content -Encoding UTF8
@@ -265,7 +267,7 @@ function Get-JsonObject([string]$Path) {
 function Write-JsonObject([string]$Path, $Object) {
   $json = $Object | ConvertTo-Json -Depth 80
   if ($DryRun) {
-    Write-Step "DryRun: would write JSON $Path"
+    Write-Step "演练模式：不会写入 JSON / DryRun: would write JSON $Path"
     return
   }
   Set-Content -LiteralPath $Path -Value $json -Encoding UTF8
@@ -277,7 +279,7 @@ function Find-Python {
     $found = Get-Command $cmd -ErrorAction SilentlyContinue
     if ($found) { return $found.Source }
   }
-  throw 'Python 3 is required for this action but was not found on PATH.'
+  throw '缺少 Python 3 / Python 3 is required for this action but was not found on PATH.'
 }
 
 function Invoke-PythonCode([string]$PythonExe, [string]$Code, [string[]]$Arguments = @()) {
@@ -303,7 +305,7 @@ function Resolve-TargetProvider([hashtable]$Paths) {
     return $currentProvider
   }
 
-  throw 'No active model_provider was found. Re-run with -ProviderName, and pass -ProviderBaseUrl if the provider section must be created.'
+  throw '未找到当前 model_provider / No active model_provider was found. Re-run with -ProviderName, and pass -ProviderBaseUrl if the provider section must be created.'
 }
 
 function Get-CodexAuthMode([hashtable]$Paths) {
@@ -318,16 +320,16 @@ function Write-AuthModeDiagnosis([hashtable]$Paths) {
   $mode = Get-CodexAuthMode $Paths
   Write-Step "auth_mode: $mode"
   if ($mode -match '^(?i:apikey)$') {
-    Write-Step 'WARNING: Codex is logged in with an API key. Plugins/connectors/skills UI require ChatGPT/OAuth login, so config repair alone cannot un-grey them.'
-    Write-Step 'Next step: in Codex Desktop choose Settings -> Log out, then sign in with ChatGPT/OAuth. Keep your local model_provider/base_url unchanged after login.'
+    Write-Step '警告 / WARNING: 当前是 API key 登录。Plugins/connectors/skills UI require ChatGPT/OAuth login, so config repair alone cannot un-grey them.'
+    Write-Step '下一步 / Next step: Codex Desktop 里点 Settings -> Log out，然后用 ChatGPT/OAuth 登录。登录后继续保留你的本地 model_provider/base_url。'
   } elseif ($mode -match '^(?i:chatgpt)$') {
-    Write-Step 'auth_mode check: ChatGPT/OAuth login is present; plugin UI auth prerequisite is satisfied.'
+    Write-Step '登录态正常 / auth_mode check: ChatGPT/OAuth login is present; plugin UI auth prerequisite is satisfied.'
   }
 }
 
 function Invoke-Diagnose {
   $paths = Get-Paths
-  Write-Step "Codex home: $($paths.Home)"
+  Write-Step "Codex 目录 / Codex home: $($paths.Home)"
   foreach ($k in @('Config','Auth','Credentials','State','Sessions','ArchivedSessions')) {
     Write-Step ("{0}: {1}" -f $k, (Test-Path -LiteralPath $paths[$k]))
   }
@@ -335,16 +337,16 @@ function Invoke-Diagnose {
 
   $config = Read-TextFile $paths.Config
   $provider = Get-TopTomlString $config 'model_provider'
-  Write-Step "model_provider: $provider"
+  Write-Step "当前模型提供方 / model_provider: $provider"
   if ($provider) {
     $section = Get-TomlSection $config ("model_providers.$provider")
     if ($section) {
       $requires = if ($section -match '(?m)^requires_openai_auth\s*=\s*(true|false)') { $Matches[1] } else { '<unset>' }
       $baseUrl = if ($section -match '(?m)^base_url\s*=\s*"([^"]+)"') { $Matches[1] } else { '<unset>' }
-      Write-Step "provider.base_url: $baseUrl"
-      Write-Step "provider.requires_openai_auth: $requires"
+      Write-Step "模型接口地址 / provider.base_url: $baseUrl"
+      Write-Step "插件登录要求 / provider.requires_openai_auth: $requires"
     } else {
-      Write-Step "provider section missing: [model_providers.$provider]"
+      Write-Step "缺少 provider 配置 / provider section missing: [model_providers.$provider]"
     }
   }
 
@@ -359,15 +361,15 @@ function Invoke-Diagnose {
       $baseUrl = if ($body -match '(?m)^base_url\s*=\s*"([^"]+)"') { $Matches[1] } else { '<unset>' }
       $requires = if ($body -match '(?m)^requires_openai_auth\s*=\s*(true|false)') { $Matches[1] } else { '<unset>' }
       $marker = if ($name -eq $provider) { '*' } else { '-' }
-      Write-Step ("provider {0} {1}: base_url={2}; requires_openai_auth={3}" -f $marker, $name, $baseUrl, $requires)
+      Write-Step ("provider 明细 / provider {0} {1}: base_url={2}; requires_openai_auth={3}" -f $marker, $name, $baseUrl, $requires)
     }
   }
 
   $cfSection = Get-TomlSection $config 'mcp_servers.cloudflare-api'
-  Write-Step ("cloudflare-api MCP config: {0}" -f [bool]$cfSection)
+  Write-Step ("Cloudflare MCP 配置 / cloudflare-api MCP config: {0}" -f [bool]$cfSection)
   if ($cfSection) {
     $hasUa = $cfSection -match 'User-Agent'
-    Write-Step "cloudflare-api User-Agent header: $hasUa"
+    Write-Step "Cloudflare User-Agent 请求头 / cloudflare-api User-Agent header: $hasUa"
   }
 
   $creds = Get-JsonObject $paths.Credentials
@@ -382,12 +384,12 @@ function Invoke-Diagnose {
       }
     }
   }
-  Write-Step "cloudflare credentials: $($cfCreds.Count)"
+  Write-Step "Cloudflare 凭据数量 / cloudflare credentials: $($cfCreds.Count)"
   foreach ($p in $cfCreds) {
     $exp = Get-ObjectPropertyValue $p.Value 'expires_at' $null
     if ($exp) {
       $dt = [DateTimeOffset]::FromUnixTimeMilliseconds([int64]$exp).LocalDateTime
-      Write-Step ("cloudflare credential expires_at: {0:yyyy-MM-dd HH:mm:ss}" -f $dt)
+      Write-Step ("Cloudflare 凭据过期时间 / cloudflare credential expires_at: {0:yyyy-MM-dd HH:mm:ss}" -f $dt)
     }
   }
 
@@ -403,7 +405,7 @@ cur = con.cursor()
 print(cur.execute("select count(*) from threads").fetchone()[0])
 '@
       $count = Invoke-PythonCode $python $py @($paths.State)
-      Write-Step "state_5.sqlite threads: $count"
+      Write-Step "会话索引数量 / state_5.sqlite threads: $count"
       $py = @'
 import sqlite3
 import sys
@@ -430,16 +432,16 @@ for row in con.execute("select rollout_path, cwd from threads"):
 print(counts)
 '@
       $pathCounts = Invoke-PythonCode $python $py @($paths.State)
-      Write-Step "state_5.sqlite path styles: $pathCounts"
+      Write-Step "会话路径风格统计 / state_5.sqlite path styles: $pathCounts"
     } catch {
-      Write-Step "state_5.sqlite threads: <unable to inspect: $($_.Exception.Message)>"
+      Write-Step "无法检查会话索引 / state_5.sqlite threads: <unable to inspect: $($_.Exception.Message)>"
     }
   }
 }
 
 function Repair-PluginUi {
   $paths = Get-Paths
-  if (-not (Test-Path -LiteralPath $paths.Config)) { throw "config.toml not found: $($paths.Config)" }
+  if (-not (Test-Path -LiteralPath $paths.Config)) { throw "未找到 config.toml / config.toml not found: $($paths.Config)" }
   if (-not [string]::IsNullOrWhiteSpace($ProviderName)) { Assert-TomlBareKeyPath $ProviderName 'ProviderName' }
   if (-not [string]::IsNullOrWhiteSpace($LocalTokenEnvVar)) { Assert-EnvVarName $LocalTokenEnvVar 'LocalTokenEnvVar' }
   if (-not [string]::IsNullOrWhiteSpace($ProviderBaseUrl)) { Assert-NoControlChars $ProviderBaseUrl 'ProviderBaseUrl' }
@@ -457,7 +459,7 @@ function Repair-PluginUi {
   $body = Get-TomlSection $content $sectionName
   if ([string]::IsNullOrWhiteSpace($body)) {
     if ([string]::IsNullOrWhiteSpace($ProviderBaseUrl)) {
-      throw "Provider section [$sectionName] is missing. Re-run with -ProviderBaseUrl to create it, or run your switcher first so Codex config.toml has an active provider."
+      throw "缺少 provider 配置 [$sectionName] / Provider section is missing. Re-run with -ProviderBaseUrl to create it, or run your switcher first so Codex config.toml has an active provider."
     }
     $body = ''
     $body = Set-SectionKeyValue $body 'name' (ConvertTo-TomlString $targetProvider)
@@ -478,7 +480,7 @@ function Repair-PluginUi {
   $features = Set-SectionKeyValue $features 'remote_control' 'false'
   $content = Set-TomlSection $content 'features' $features
   Write-TextFile $paths.Config $content
-  Write-Step "Plugin UI config repaired for provider '$targetProvider'."
+  Write-Step "插件 UI 配置已修复 / Plugin UI config repaired for provider '$targetProvider'."
   Write-AuthModeDiagnosis $paths
 
   if ($FixEnv) {
@@ -487,7 +489,7 @@ function Repair-PluginUi {
       $effectiveTokenEnvVar = Get-TomlBodyString $body 'env_key'
     }
     if ([string]::IsNullOrWhiteSpace($effectiveTokenEnvVar)) {
-      Write-Step 'FixEnv skipped because no LocalTokenEnvVar was provided and the provider has no env_key.'
+      Write-Step '跳过环境变量修复 / FixEnv skipped because no LocalTokenEnvVar was provided and the provider has no env_key.'
       return
     }
     Assert-EnvVarName $effectiveTokenEnvVar 'effective provider env_key'
@@ -495,20 +497,20 @@ function Repair-PluginUi {
     $localToken = [Environment]::GetEnvironmentVariable($effectiveTokenEnvVar, 'User')
     if ($userApiKey -and -not $localToken) {
       [Environment]::SetEnvironmentVariable($effectiveTokenEnvVar, $userApiKey, 'User')
-      Write-Step "$effectiveTokenEnvVar saved from existing CODEX_API_KEY: $(Mask-Secret $userApiKey)"
+      Write-Step "$effectiveTokenEnvVar 已从 CODEX_API_KEY 保存 / saved from existing CODEX_API_KEY: $(Mask-Secret $userApiKey)"
     } elseif ($userApiKey -and $localToken -and $userApiKey -ne $localToken) {
       if (-not $ForceEnvMigration) {
-        Write-Step "$effectiveTokenEnvVar already exists and differs from CODEX_API_KEY; environment cleanup skipped. Re-run with -ForceEnvMigration to overwrite $effectiveTokenEnvVar from CODEX_API_KEY and clear CODEX_API_KEY."
+        Write-Step "$effectiveTokenEnvVar 已存在且不同于 CODEX_API_KEY，已跳过环境清理 / already exists and differs from CODEX_API_KEY; re-run with -ForceEnvMigration to overwrite and clear CODEX_API_KEY."
         return
       }
       [Environment]::SetEnvironmentVariable($effectiveTokenEnvVar, $userApiKey, 'User')
-      Write-Step "$effectiveTokenEnvVar overwritten from CODEX_API_KEY because -ForceEnvMigration was set: $(Mask-Secret $userApiKey)"
+      Write-Step "$effectiveTokenEnvVar 已按 -ForceEnvMigration 从 CODEX_API_KEY 覆盖 / overwritten from CODEX_API_KEY: $(Mask-Secret $userApiKey)"
     }
     [Environment]::SetEnvironmentVariable('CODEX_API_KEY', $null, 'User')
     [Environment]::SetEnvironmentVariable('CODEX_API_BASE_URL', $null, 'User')
     Remove-Item Env:\CODEX_API_KEY -ErrorAction SilentlyContinue
     Remove-Item Env:\CODEX_API_BASE_URL -ErrorAction SilentlyContinue
-    Write-Step "Cleared user-level CODEX_API_KEY and CODEX_API_BASE_URL."
+    Write-Step "已清理用户环境变量 / Cleared user-level CODEX_API_KEY and CODEX_API_BASE_URL."
   }
 }
 
@@ -559,7 +561,7 @@ for name in ("logs_2.sqlite", "logs_1.sqlite"):
 
 function Repair-CloudflareMcp {
   $paths = Get-Paths
-  if (-not (Test-Path -LiteralPath $paths.Config)) { throw "config.toml not found: $($paths.Config)" }
+  if (-not (Test-Path -LiteralPath $paths.Config)) { throw "未找到 config.toml / config.toml not found: $($paths.Config)" }
   Assert-NoControlChars $CloudflareUserAgent 'CloudflareUserAgent'
   $backup = New-BackupSet $paths 'cloudflare-mcp'
   Backup-File $paths.Config $backup | Out-Null
@@ -577,12 +579,12 @@ http_headers = { "User-Agent" = $cfUserAgent }
 "@
   $content = Set-TomlSection $content 'mcp_servers.cloudflare-api' $body
   Write-TextFile $paths.Config $content
-  Write-Step "Cloudflare MCP config repaired."
+  Write-Step "Cloudflare MCP 配置已修复 / Cloudflare MCP config repaired."
 
   if ($CloudflareOAuth) {
     Start-CloudflareOAuth
   } else {
-    Write-Step "Cloudflare OAuth skipped. Re-run with -CloudflareOAuth if token login is required."
+    Write-Step "已跳过 Cloudflare OAuth / Cloudflare OAuth skipped. Re-run with -CloudflareOAuth if token login is required."
   }
 }
 
@@ -614,7 +616,7 @@ function Start-CloudflareOAuth {
   } else {
     $scopes = @('offline_access','user:read','account:read','zone:read','workers:read','pages:read','ai:read')
   }
-  Write-Step ("Cloudflare OAuth scopes: {0}" -f ($scopes -join ' '))
+  Write-Step ("Cloudflare OAuth 权限范围 / Cloudflare OAuth scopes: {0}" -f ($scopes -join ' '))
 
   $registerBody = @{
     redirect_uris = @($redirectUri)
@@ -627,7 +629,7 @@ function Start-CloudflareOAuth {
   $headers = @{ 'User-Agent' = $CloudflareUserAgent; 'Accept' = 'application/json' }
   $client = Invoke-RestMethod -Uri 'https://mcp.cloudflare.com/register' -Method Post -Headers $headers -ContentType 'application/json' -Body $registerBody
   $clientId = [string](Get-ObjectPropertyValue $client 'client_id' '')
-  if (-not $clientId) { throw 'Cloudflare dynamic client registration did not return client_id.' }
+  if (-not $clientId) { throw 'Cloudflare 动态客户端注册没有返回 client_id / Cloudflare dynamic client registration did not return client_id.' }
 
   $rng = [Security.Cryptography.RandomNumberGenerator]::Create()
   $bytes = New-Object byte[] 48
@@ -654,7 +656,7 @@ function Start-CloudflareOAuth {
     [uri]::EscapeDataString($_.Key) + '=' + [uri]::EscapeDataString([string]$_.Value)
   }) -join '&')
 
-  Write-Step "Open Cloudflare OAuth in browser and approve access."
+  Write-Step "请在浏览器批准 Cloudflare 授权 / Open Cloudflare OAuth in browser and approve access."
   if ($NoBrowser) {
     Write-Host $authUrl
   } else {
@@ -666,7 +668,7 @@ function Start-CloudflareOAuth {
   while (-not $task.IsCompleted) {
     if ((Get-Date) -gt $deadline) {
       $listener.Stop()
-      throw "Timed out waiting for OAuth callback after $CloudflareCallbackTimeoutSec seconds."
+      throw "等待 OAuth 回调超时 / Timed out waiting for OAuth callback after $CloudflareCallbackTimeoutSec seconds."
     }
     Start-Sleep -Milliseconds 250
   }
@@ -689,10 +691,10 @@ function Start-CloudflareOAuth {
   $context.Response.Close()
   $listener.Stop()
 
-  if ($params.ContainsKey('error')) { throw "Cloudflare OAuth error: $($params['error'])" }
-  if ($params['state'] -ne $state) { throw 'Cloudflare OAuth state mismatch.' }
+  if ($params.ContainsKey('error')) { throw "Cloudflare OAuth 错误 / Cloudflare OAuth error: $($params['error'])" }
+  if ($params['state'] -ne $state) { throw 'Cloudflare OAuth state 不匹配 / Cloudflare OAuth state mismatch.' }
   $code = $params['code']
-  if (-not $code) { throw 'Cloudflare OAuth callback did not include code.' }
+  if (-not $code) { throw 'Cloudflare OAuth 回调没有 code / Cloudflare OAuth callback did not include code.' }
 
   $tokenBody = @{
     grant_type = 'authorization_code'
@@ -704,7 +706,7 @@ function Start-CloudflareOAuth {
   }
   $token = Invoke-RestMethod -Uri 'https://mcp.cloudflare.com/token' -Method Post -Headers $headers -ContentType 'application/x-www-form-urlencoded' -Body $tokenBody
   $accessToken = [string](Get-ObjectPropertyValue $token 'access_token' '')
-  if (-not $accessToken) { throw 'Cloudflare token response did not include access_token.' }
+  if (-not $accessToken) { throw 'Cloudflare token 响应没有 access_token / Cloudflare token response did not include access_token.' }
 
   $expiresInValue = Get-ObjectPropertyValue $token 'expires_in' $null
   $expiresIn = if ($expiresInValue) { [int]$expiresInValue } else { 3600 }
@@ -734,12 +736,12 @@ function Start-CloudflareOAuth {
   }
   Write-JsonObject $paths.Credentials $creds
   $dt = [DateTimeOffset]::FromUnixTimeMilliseconds($expiresAt).LocalDateTime
-  Write-Step ("Cloudflare OAuth credential saved as {0}; expires_at={1:yyyy-MM-dd HH:mm:ss}; refresh_token={2}" -f $key, $dt, [bool](Get-ObjectPropertyValue $token 'refresh_token' ''))
+  Write-Step ("Cloudflare OAuth 凭据已保存 / credential saved as {0}; expires_at={1:yyyy-MM-dd HH:mm:ss}; refresh_token={2}" -f $key, $dt, [bool](Get-ObjectPropertyValue $token 'refresh_token' ''))
 }
 
 function Repair-SessionVisibility {
   $paths = Get-Paths
-  if (-not (Test-Path -LiteralPath $paths.State)) { throw "state_5.sqlite not found: $($paths.State)" }
+  if (-not (Test-Path -LiteralPath $paths.State)) { throw "未找到 state_5.sqlite / state_5.sqlite not found: $($paths.State)" }
   $targetProvider = Resolve-TargetProvider $paths
   $backup = New-BackupSet $paths 'session-visibility'
   Backup-File $paths.State $backup | Out-Null
@@ -957,7 +959,7 @@ print(json.dumps(manifest, ensure_ascii=False))
 '@
   $dryArg = if ($DryRun) { 'true' } else { 'false' }
   $out = Invoke-PythonCode $python $py @($paths.Home, $targetProvider, $dryArg, $backup, $ThreadId, $ThreadPathStyle)
-  Write-Step "Session visibility result: $out"
+  Write-Step "会话可见性修复结果 / Session visibility result: $out"
 }
 
 switch ($Action) {
@@ -972,4 +974,3 @@ switch ($Action) {
     Invoke-Diagnose
   }
 }
-

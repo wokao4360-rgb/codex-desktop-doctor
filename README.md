@@ -1,90 +1,62 @@
 # codex-desktop-doctor
 
-Codex Desktop 本地修复工具。普通用户只需要下载一个文件，双击运行。
+## 先看这里 / Read this first
 
-## 下载
+**只下载一个文件：** [Latest Release](https://github.com/wokao4360-rgb/codex-desktop-doctor/releases/latest) 里的 `CodexDesktopDoctor.cmd`。
 
-去 [Latest Release](https://github.com/wokao4360-rgb/codex-desktop-doctor/releases/latest) 下载：
-
-- `CodexDesktopDoctor.cmd`
-
-用法：
+**最常见成功流程：**
 
 1. 关闭 Codex Desktop。
 2. 双击 `CodexDesktopDoctor.cmd`。
-3. 等窗口提示完成。
-4. 重新打开 Codex Desktop。
+3. 看到完成提示后，重新打开 Codex Desktop。
 
-双击默认执行：`RepairPluginUi`。
+**如果插件还是灰：看输出里的 `auth_mode`。**
 
-它会保留你当前的 `model_provider` 和 `base_url`，只修复插件 UI 常见冲突项：
+- `auth_mode: chatgpt`：登录态对了，插件前置条件已满足。
+- `auth_mode: apikey`：还会灰。请在 Codex Desktop 里退出 API key 登录，再用 ChatGPT/OAuth 登录。登录后本地模型 provider 仍可继续指向你的本地 API。
 
-- 当前 provider 的 `requires_openai_auth = true`
-- `[features] remote_control = false`
+这个工具修的是 Codex Desktop 本地配置冲突，不会替你生成 ChatGPT/OAuth 登录态。
 
-注意：如果输出里显示 `auth_mode: apikey`，插件仍会灰。脚本不能替你生成 ChatGPT/OAuth 登录态；需要在 Codex Desktop 里退出 API key 登录，然后用 ChatGPT/OAuth 重新登录。登录后模型 provider 仍可继续指向你的本地 API。
+## 它修什么 / What it fixes
 
-## 适合修什么
+- 本地 API / cc switch / claude-code-router / Cockpit/Cocktail 后，插件、connector、skills 变灰。
+- provider 配置需要保持本地 API，但插件 UI 需要 ChatGPT/OAuth 登录态。
+- Cloudflare MCP 配置问题。
+- 历史会话不可见，或 `cannot resume running thread ... mismatched path`。
 
-- 使用本地 API / cc switch / claude-code-router / Cockpit/Cocktail 后，Codex 插件、connector、skills 变灰。
-- ChatGPT/OAuth 已登录，但本地模型 provider 还要继续走自己的 OpenAI-compatible API。
-- 诊断当前是不是被 API key 登录态卡住。
-- Cloudflare MCP 配置或会话列表需要手动修时，也可以用同一个文件带参数运行。
+## 默认双击会做什么
 
-## 高级用法
+双击默认执行 `RepairPluginUi`：
 
-在 `CodexDesktopDoctor.cmd` 所在目录打开终端。
+- 保留当前 `model_provider` 和 `base_url`。
+- 设置当前 provider：`requires_openai_auth = true`。
+- 设置 `[features] remote_control = false`。
+- 显示中/英文混合诊断，重点看 `auth_mode`。
 
-只诊断，不写文件：
+## 命令行高级用法
+
+在 `CodexDesktopDoctor.cmd` 所在目录打开终端：
 
 ```powershell
 .\CodexDesktopDoctor.cmd -Action Diagnose
-```
-
-修插件 UI：
-
-```powershell
 .\CodexDesktopDoctor.cmd -Action RepairPluginUi
-```
-
-修 Cloudflare MCP 配置：
-
-```powershell
-.\CodexDesktopDoctor.cmd -Action RepairCloudflareMcp
-```
-
-需要重新走 Cloudflare OAuth：
-
-```powershell
 .\CodexDesktopDoctor.cmd -Action RepairCloudflareMcp -CloudflareOAuth
-```
-
-修历史会话可见性：
-
-```powershell
 .\CodexDesktopDoctor.cmd -Action RepairSessionVisibility
-```
-
-修 `cannot resume running thread ... mismatched path`：
-
-```powershell
 .\CodexDesktopDoctor.cmd -Action RepairSessionVisibility -ThreadId <thread-id> -ThreadPathStyle Extended
 ```
 
-可选：`-ThreadPathStyle Auto|Normal|Extended`。
+`-ThreadPathStyle` 可选：`Auto|Normal|Extended`。
 
-## 安全说明
+## 安全说明 / Safety
 
 - 写文件前会备份。
 - 不打印 token。
-- 不上传任何配置、凭据、会话或遥测。
+- 不上传配置、凭据、会话或遥测。
 - 备份目录：`%USERPROFILE%\.codex\doctor-backups\...`
 
-## 开发
+## 开发 / Development
 
-源码脚本在 `scripts/CodexDesktopDoctor.ps1`。
-
-运行测试：
+源码脚本：`scripts/CodexDesktopDoctor.ps1`
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\tests\Run-SmokeTests.ps1
