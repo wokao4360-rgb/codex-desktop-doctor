@@ -45,15 +45,15 @@ $hits = Get-ChildItem -LiteralPath $RepoRoot -Recurse -File |
   Select-String -Pattern $secretPattern -AllMatches
 Assert (-not $hits) "Potential secret-like strings found: $($hits | Select-Object -First 5 | Out-String)"
 
-Write-Test 'RepairPluginUi fixture'
+Write-Test 'RepairPluginUi keeps current provider fixture'
 $fixtureHome = New-FixtureHome 'plugin'
 try {
   Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value @'
-model_provider = "old_provider"
+model_provider = "cc_switch_provider"
 
-[model_providers.old_provider]
-name = "old_provider"
-base_url = "http://example.invalid/v1"
+[model_providers.cc_switch_provider]
+name = "cc_switch_provider"
+base_url = "http://127.0.0.1:3456/v1"
 env_key = "OLD_KEY"
 requires_openai_auth = false
 
@@ -63,13 +63,36 @@ remote_control = true
 [other]
 keep = "yes"
 '@
-  Invoke-Doctor @('-Action','RepairPluginUi','-CodexHome',$fixtureHome,'-ProviderName','codex_local_access','-ProviderBaseUrl','http://127.0.0.1:53528/v1')
+  Invoke-Doctor @('-Action','RepairPluginUi','-CodexHome',$fixtureHome)
   $config = Get-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Raw
-  Assert ($config -match 'model_provider\s*=\s*"codex_local_access"') 'model_provider was not updated.'
-  Assert ($config -match '\[model_providers\.codex_local_access\]') 'provider section was not created.'
+  Assert ($config -match 'model_provider\s*=\s*"cc_switch_provider"') 'model_provider should not be switched by default.'
+  Assert ($config -match '\[model_providers\.cc_switch_provider\]') 'current provider section was not preserved.'
+  Assert ($config -match 'base_url\s*=\s*"http://127\.0\.0\.1:3456/v1"') 'existing provider base_url was not preserved.'
   Assert ($config -match 'requires_openai_auth\s*=\s*true') 'requires_openai_auth was not enabled.'
   Assert ($config -match 'remote_control\s*=\s*false') 'remote_control was not disabled.'
   Assert ($config -match 'keep\s*=\s*"yes"') 'unrelated section was not preserved.'
+}
+finally {
+  Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue
+}
+
+Write-Test 'RepairPluginUi explicit provider fixture'
+$fixtureHome = New-FixtureHome 'plugin-explicit'
+try {
+  Set-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Encoding UTF8 -Value @'
+model_provider = "old_provider"
+
+[model_providers.old_provider]
+name = "old_provider"
+base_url = "http://example.invalid/v1"
+requires_openai_auth = false
+'@
+  Invoke-Doctor @('-Action','RepairPluginUi','-CodexHome',$fixtureHome,'-ProviderName','codex_local_access','-ProviderBaseUrl','http://127.0.0.1:53528/v1','-LocalTokenEnvVar','CODEX_LOCAL_ACCESS_TOKEN','-ProviderWireApi','responses')
+  $config = Get-Content -LiteralPath (Join-Path $fixtureHome 'config.toml') -Raw
+  Assert ($config -match 'model_provider\s*=\s*"codex_local_access"') 'explicit model_provider was not selected.'
+  Assert ($config -match '\[model_providers\.codex_local_access\]') 'explicit provider section was not created.'
+  Assert ($config -match 'env_key\s*=\s*"CODEX_LOCAL_ACCESS_TOKEN"') 'explicit env_key was not written.'
+  Assert ($config -match 'wire_api\s*=\s*"responses"') 'explicit wire_api was not written.'
 }
 finally {
   Remove-Item -LiteralPath $fixtureHome -Recurse -Force -ErrorAction SilentlyContinue

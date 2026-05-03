@@ -4,9 +4,10 @@ param(
   [string]$Action = 'Diagnose',
 
   [string]$CodexHome = (Join-Path $env:USERPROFILE '.codex'),
-  [string]$ProviderName = 'codex_local_access',
-  [string]$ProviderBaseUrl = 'http://127.0.0.1:53528/v1',
-  [string]$LocalTokenEnvVar = 'CODEX_LOCAL_ACCESS_TOKEN',
+  [string]$ProviderName = '',
+  [string]$ProviderBaseUrl = '',
+  [string]$LocalTokenEnvVar = '',
+  [string]$ProviderWireApi = '',
 
   [switch]$FixEnv,
   [switch]$ForceEnvMigration,
@@ -172,6 +173,13 @@ function Get-TopTomlString([string]$Content, [string]$Key) {
   return $null
 }
 
+function Get-TomlBodyString([string]$Body, [string]$Key) {
+  $pattern = '(?m)^' + [regex]::Escape($Key) + '\s*=\s*"([^"]*)"'
+  $m = [regex]::Match($Body, $pattern)
+  if ($m.Success) { return $m.Groups[1].Value }
+  return $null
+}
+
 function Set-TopTomlString([string]$Content, [string]$Key, [string]$Value) {
   Assert-TomlBareKeyPath $Key 'Top-level TOML key'
   $pattern = '(?m)^' + [regex]::Escape($Key) + '\s*=\s*"[^"]*"'
@@ -237,6 +245,22 @@ function Find-Python {
   throw 'Python 3 is required for this action but was not found on PATH.'
 }
 
+function Resolve-TargetProvider([hashtable]$Paths) {
+  if (-not [string]::IsNullOrWhiteSpace($ProviderName)) {
+    Assert-TomlBareKeyPath $ProviderName 'ProviderName'
+    return $ProviderName
+  }
+
+  $config = Read-TextFile $Paths.Config
+  $currentProvider = Get-TopTomlString $config 'model_provider'
+  if (-not [string]::IsNullOrWhiteSpace($currentProvider)) {
+    Assert-TomlBareKeyPath $currentProvider 'current model_provider'
+    return $currentProvider
+  }
+
+  throw 'No active model_provider was found. Re-run with -ProviderName, and pass -ProviderBaseUrl if the provider section must be created.'
+}
+
 function Invoke-Diagnose {
   $paths = Get-Paths
   Write-Step "Codex home: $($paths.Home)"
@@ -256,6 +280,21 @@ function Invoke-Diagnose {
       Write-Step "provider.requires_openai_auth: $requires"
     } else {
       Write-Step "provider section missing: [model_providers.$provider]"
+    }
+  }
+
+  $providerMatches = [regex]::Matches($config, '(?m)^\[model_providers\.([A-Za-z0-9_.-]+)\]\s*$')
+  if ($providerMatches.Count -gt 0) {
+    $seen = @{}
+    foreach ($m in $providerMatches) {
+      $name = $m.Groups[1].Value
+      if ($seen.ContainsKey($name)) { continue }
+      $seen[$name] = $true
+      $body = Get-TomlSection $config ("model_providers.$name")
+      $baseUrl = if ($body -match '(?m)^base_url\s*=\s*"([^"]+)"') { $Matches[1] } else { '<unset>' }
+      $requires = if ($body -match '(?m)^requires_openai_auth\s*=\s*(true|false)') { $Matches[1] } else { '<unset>' }
+      $marker = if ($name -eq $provider) { '*' } else { '-' }
+      Write-Step ("provider {0} {1}: base_url={2}; requires_openai_auth={3}" -f $marker, $name, $baseUrl, $requires)
     }
   }
 
@@ -302,33 +341,35 @@ function Invoke-Diagnose {
 function Repair-PluginUi {
   $paths = Get-Paths
   if (-not (Test-Path -LiteralPath $paths.Config)) { throw "config.toml not found: $($paths.Config)" }
-  Assert-TomlBareKeyPath $ProviderName 'ProviderName'
-  Assert-EnvVarName $LocalTokenEnvVar 'LocalTokenEnvVar'
-  Assert-NoControlChars $ProviderBaseUrl 'ProviderBaseUrl'
+  if (-not [string]::IsNullOrWhiteSpace($ProviderName)) { Assert-TomlBareKeyPath $ProviderName 'ProviderName' }
+  if (-not [string]::IsNullOrWhiteSpace($LocalTokenEnvVar)) { Assert-EnvVarName $LocalTokenEnvVar 'LocalTokenEnvVar' }
+  if (-not [string]::IsNullOrWhiteSpace($ProviderBaseUrl)) { Assert-NoControlChars $ProviderBaseUrl 'ProviderBaseUrl' }
+  if (-not [string]::IsNullOrWhiteSpace($ProviderWireApi)) { Assert-NoControlChars $ProviderWireApi 'ProviderWireApi' }
   $backup = New-BackupSet $paths 'plugin-ui'
   Backup-File $paths.Config $backup | Out-Null
 
   $content = Read-TextFile $paths.Config
-  $currentProvider = Get-TopTomlString $content 'model_provider'
-  if ([string]::IsNullOrWhiteSpace($currentProvider)) { $currentProvider = $ProviderName }
-  if ($ProviderName) {
-    $currentProvider = $ProviderName
+  $targetProvider = Resolve-TargetProvider $paths
+  if (-not [string]::IsNullOrWhiteSpace($ProviderName)) {
     $content = Set-TopTomlString $content 'model_provider' $ProviderName
   }
 
-  $sectionName = "model_providers.$currentProvider"
+  $sectionName = "model_providers.$targetProvider"
   $body = Get-TomlSection $content $sectionName
   if ([string]::IsNullOrWhiteSpace($body)) {
+    if ([string]::IsNullOrWhiteSpace($ProviderBaseUrl)) {
+      throw "Provider section [$sectionName] is missing. Re-run with -ProviderBaseUrl to create it, or run your switcher first so Codex config.toml has an active provider."
+    }
     $body = ''
-    $body = Set-SectionKeyValue $body 'name' (ConvertTo-TomlString $currentProvider)
+    $body = Set-SectionKeyValue $body 'name' (ConvertTo-TomlString $targetProvider)
     $body = Set-SectionKeyValue $body 'base_url' (ConvertTo-TomlString $ProviderBaseUrl)
-    $body = Set-SectionKeyValue $body 'env_key' (ConvertTo-TomlString $LocalTokenEnvVar)
-    $body = Set-SectionKeyValue $body 'wire_api' (ConvertTo-TomlString 'responses')
+    if (-not [string]::IsNullOrWhiteSpace($LocalTokenEnvVar)) { $body = Set-SectionKeyValue $body 'env_key' (ConvertTo-TomlString $LocalTokenEnvVar) }
+    if (-not [string]::IsNullOrWhiteSpace($ProviderWireApi)) { $body = Set-SectionKeyValue $body 'wire_api' (ConvertTo-TomlString $ProviderWireApi) }
     $body = Set-SectionKeyValue $body 'requires_openai_auth' 'true'
   } else {
-    if ($ProviderBaseUrl) { $body = Set-SectionKeyValue $body 'base_url' (ConvertTo-TomlString $ProviderBaseUrl) }
-    if ($LocalTokenEnvVar) { $body = Set-SectionKeyValue $body 'env_key' (ConvertTo-TomlString $LocalTokenEnvVar) }
-    if ($body -notmatch '(?m)^wire_api\s*=') { $body = Set-SectionKeyValue $body 'wire_api' (ConvertTo-TomlString 'responses') }
+    if (-not [string]::IsNullOrWhiteSpace($ProviderBaseUrl)) { $body = Set-SectionKeyValue $body 'base_url' (ConvertTo-TomlString $ProviderBaseUrl) }
+    if (-not [string]::IsNullOrWhiteSpace($LocalTokenEnvVar)) { $body = Set-SectionKeyValue $body 'env_key' (ConvertTo-TomlString $LocalTokenEnvVar) }
+    if (-not [string]::IsNullOrWhiteSpace($ProviderWireApi)) { $body = Set-SectionKeyValue $body 'wire_api' (ConvertTo-TomlString $ProviderWireApi) }
     $body = Set-SectionKeyValue $body 'requires_openai_auth' 'true'
   }
   $content = Set-TomlSection $content $sectionName $body
@@ -338,21 +379,30 @@ function Repair-PluginUi {
   $features = Set-SectionKeyValue $features 'remote_control' 'false'
   $content = Set-TomlSection $content 'features' $features
   Write-TextFile $paths.Config $content
-  Write-Step "Plugin UI config repaired for provider '$currentProvider'."
+  Write-Step "Plugin UI config repaired for provider '$targetProvider'."
 
   if ($FixEnv) {
+    $effectiveTokenEnvVar = $LocalTokenEnvVar
+    if ([string]::IsNullOrWhiteSpace($effectiveTokenEnvVar)) {
+      $effectiveTokenEnvVar = Get-TomlBodyString $body 'env_key'
+    }
+    if ([string]::IsNullOrWhiteSpace($effectiveTokenEnvVar)) {
+      Write-Step 'FixEnv skipped because no LocalTokenEnvVar was provided and the provider has no env_key.'
+      return
+    }
+    Assert-EnvVarName $effectiveTokenEnvVar 'effective provider env_key'
     $userApiKey = [Environment]::GetEnvironmentVariable('CODEX_API_KEY', 'User')
-    $localToken = [Environment]::GetEnvironmentVariable($LocalTokenEnvVar, 'User')
+    $localToken = [Environment]::GetEnvironmentVariable($effectiveTokenEnvVar, 'User')
     if ($userApiKey -and -not $localToken) {
-      [Environment]::SetEnvironmentVariable($LocalTokenEnvVar, $userApiKey, 'User')
-      Write-Step "$LocalTokenEnvVar saved from existing CODEX_API_KEY: $(Mask-Secret $userApiKey)"
+      [Environment]::SetEnvironmentVariable($effectiveTokenEnvVar, $userApiKey, 'User')
+      Write-Step "$effectiveTokenEnvVar saved from existing CODEX_API_KEY: $(Mask-Secret $userApiKey)"
     } elseif ($userApiKey -and $localToken -and $userApiKey -ne $localToken) {
       if (-not $ForceEnvMigration) {
-        Write-Step "$LocalTokenEnvVar already exists and differs from CODEX_API_KEY; environment cleanup skipped. Re-run with -ForceEnvMigration to overwrite $LocalTokenEnvVar from CODEX_API_KEY and clear CODEX_API_KEY."
+        Write-Step "$effectiveTokenEnvVar already exists and differs from CODEX_API_KEY; environment cleanup skipped. Re-run with -ForceEnvMigration to overwrite $effectiveTokenEnvVar from CODEX_API_KEY and clear CODEX_API_KEY."
         return
       }
-      [Environment]::SetEnvironmentVariable($LocalTokenEnvVar, $userApiKey, 'User')
-      Write-Step "$LocalTokenEnvVar overwritten from CODEX_API_KEY because -ForceEnvMigration was set: $(Mask-Secret $userApiKey)"
+      [Environment]::SetEnvironmentVariable($effectiveTokenEnvVar, $userApiKey, 'User')
+      Write-Step "$effectiveTokenEnvVar overwritten from CODEX_API_KEY because -ForceEnvMigration was set: $(Mask-Secret $userApiKey)"
     }
     [Environment]::SetEnvironmentVariable('CODEX_API_KEY', $null, 'User')
     [Environment]::SetEnvironmentVariable('CODEX_API_BASE_URL', $null, 'User')
@@ -590,6 +640,7 @@ function Start-CloudflareOAuth {
 function Repair-SessionVisibility {
   $paths = Get-Paths
   if (-not (Test-Path -LiteralPath $paths.State)) { throw "state_5.sqlite not found: $($paths.State)" }
+  $targetProvider = Resolve-TargetProvider $paths
   $backup = New-BackupSet $paths 'session-visibility'
   Backup-File $paths.State $backup | Out-Null
 
@@ -766,7 +817,7 @@ if not dry:
 print(json.dumps(manifest, ensure_ascii=False))
 '@
   $dryArg = if ($DryRun) { 'true' } else { 'false' }
-  $out = & $python -c $py $paths.Home $ProviderName $dryArg $backup
+  $out = & $python -c $py $paths.Home $targetProvider $dryArg $backup
   Write-Step "Session visibility result: $out"
 }
 
